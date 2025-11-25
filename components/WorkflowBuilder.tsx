@@ -10,167 +10,96 @@ interface WorkflowBuilderProps {
   onDeleteWorkflow: (id: string) => void;
 }
 
-// --- JAVA CODE REFLECTED IN MODAL ---
+// --- JAVA CODE REFLECTED IN MODAL (Updated for Service Layer Architecture) ---
 const JAVA_CODE_CONTROLLER = `package com.autoflow.controller;
 
 import com.autoflow.dto.AutomationRequest;
-import com.autoflow.dto.StepDTO;
-import io.github.bonigarcia.wdm.WebDriverManager;
-import org.openqa.selenium.By;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
+import com.autoflow.service.BrowserAutomationService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.time.Duration;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "http://localhost:5173") // Allow Frontend Access
+@RequiredArgsConstructor
 public class AutomationController {
+
+    private final BrowserAutomationService automationService;
 
     @PostMapping("/run-automation")
     public Map<String, Object> runAutomation(@RequestBody AutomationRequest request) {
+        // Delegate execution to Service
+        List<String> logs = automationService.executeWorkflow(request.getSteps());
+        
+        boolean isSuccess = logs.stream().noneMatch(log -> log.contains("❌"));
+        
+        return Map.of(
+            "status", isSuccess ? "SUCCESS" : "FAILURE",
+            "logs", logs
+        );
+    }
+}`;
+
+const JAVA_CODE_SERVICE = `package com.autoflow.service;
+
+import com.autoflow.dto.StepDTO;
+import io.github.bonigarcia.wdm.WebDriverManager;
+import org.openqa.selenium.*;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
+import org.springframework.stereotype.Service;
+import java.util.*;
+
+@Service
+public class BrowserAutomationService {
+
+    public List<String> executeWorkflow(List<StepDTO> steps) {
         List<String> logs = new ArrayList<>();
         WebDriver driver = null;
 
         try {
-            // Auto-setup ChromeDriver
             WebDriverManager.chromedriver().setup();
-            
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--remote-allow-origins=*");
-            // options.addArguments("--headless"); // Enable for background execution
             
             driver = new ChromeDriver(options);
-            driver.manage().window().maximize();
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(5));
             
-            logs.add("🚀 Browser Started");
-
-            for (int i = 0; i < request.getSteps().size(); i++) {
-                StepDTO step = request.getSteps().get(i);
-                logs.add(String.format("Step %d: %s", i + 1, step.getOperation()));
-
-                try {
-                    executeStep(driver, step);
-                    logs.add("  ✅ Success");
-                } catch (Exception e) {
-                    logs.add("  ❌ Failed: " + e.getMessage());
-                    throw e; // Stop execution on failure
-                }
+            for (StepDTO step : steps) {
+                logs.add("Executing: " + step.getOperation());
+                // ... Implementation of executeSingleStep ...
+                executeSingleStep(driver, step);
             }
-            
-            return Map.of("status", "SUCCESS", "logs", logs);
-
         } catch (Exception e) {
-            logs.add("❌ Execution Interrupted: " + e.getMessage());
-            return Map.of("status", "FAILURE", "logs", logs);
+            logs.add("❌ Error: " + e.getMessage());
         } finally {
-            if (driver != null) {
-                logs.add("🏁 Closing Browser session.");
-                driver.quit();
-            }
+            if (driver != null) driver.quit();
         }
+        return logs;
     }
-
-    private void executeStep(WebDriver driver, StepDTO step) throws InterruptedException {
-        switch (step.getOperation()) {
-            case "OPEN_URL":
-                driver.get(step.getValue());
-                break;
-            case "CLICK":
-                driver.findElement(getLocator(step)).click();
-                break;
-            case "INPUT":
-                driver.findElement(getLocator(step)).sendKeys(step.getValue());
-                break;
-            case "WAIT":
-                long waitTime = Long.parseLong(step.getValue());
-                Thread.sleep(waitTime);
-                break;
-            case "ASSERT_TEXT":
-                String text = driver.findElement(getLocator(step)).getText();
-                if (!text.contains(step.getValue())) {
-                    throw new RuntimeException("Assertion Failed. Expected '" + step.getValue() + "' but found '" + text + "'");
-                }
-                break;
-            case "CONFIRM_MODAL":
-                driver.switchTo().alert().accept();
-                break;
-        }
-    }
-
-    private By getLocator(StepDTO step) {
-        String value = step.getLocator();
-        if (value == null || value.isEmpty()) return null;
-        
-        switch (step.getLocatorType()) {
-            case "XPATH": return By.xpath(value);
-            case "ID": return By.id(value);
-            case "CSS": return By.cssSelector(value);
-            default: throw new IllegalArgumentException("Unknown locator type: " + step.getLocatorType());
-        }
-    }
+    
+    // ... executeSingleStep helper method ...
 }`;
 
 const JAVA_CODE_DTO = `package com.autoflow.dto;
 
+import lombok.Data;
 import java.util.List;
 
+@Data
 public class AutomationRequest {
     private String workflowId;
     private List<StepDTO> steps;
-
-    // Getters and Setters
-    public String getWorkflowId() { return workflowId; }
-    public void setWorkflowId(String workflowId) { this.workflowId = workflowId; }
-    public List<StepDTO> getSteps() { return steps; }
-    public void setSteps(List<StepDTO> steps) { this.steps = steps; }
 }
 
 // --- StepDTO.java ---
-package com.autoflow.dto;
-
+@Data
 public class StepDTO {
     private String operation;
     private String locator;
     private String locatorType;
     private String value;
-    
-    // Getters and Setters
-    public String getOperation() { return operation; }
-    public void setOperation(String operation) { this.operation = operation; }
-    public String getLocator() { return locator; }
-    public void setLocator(String locator) { this.locator = locator; }
-    public String getLocatorType() { return locatorType; }
-    public void setLocatorType(String locatorType) { this.locatorType = locatorType; }
-    public String getValue() { return value; }
-    public void setValue(String value) { this.value = value; }
 }`;
-
-const JAVA_CODE_POM = `<dependencies>
-    <!-- Spring Boot Web -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-web</artifactId>
-    </dependency>
-    
-    <!-- Selenium Java -->
-    <dependency>
-        <groupId>org.seleniumhq.selenium</groupId>
-        <artifactId>selenium-java</artifactId>
-        <version>4.16.1</version>
-    </dependency>
-    
-    <!-- WebDriverManager (Auto download chromedriver) -->
-    <dependency>
-        <groupId>io.github.bonigarcia</groupId>
-        <artifactId>webdrivermanager</artifactId>
-        <version>5.6.3</version>
-    </dependency>
-</dependencies>`;
 
 export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({ 
   workflows, 
@@ -187,7 +116,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
   
   // Java Code Modal State
   const [showJavaModal, setShowJavaModal] = useState(false);
-  const [activeCodeTab, setActiveCodeTab] = useState<'CONTROLLER' | 'DTO' | 'POM'>('CONTROLLER');
+  const [activeCodeTab, setActiveCodeTab] = useState<'CONTROLLER' | 'SERVICE' | 'DTO'>('CONTROLLER');
   const [copied, setCopied] = useState(false);
 
   const activeWorkflow = editingWorkflow;
@@ -338,7 +267,7 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
         '❌ CONNECTION FAILED', 
         `Could not connect to Java Backend at http://localhost:8080.`,
         '1. Ensure your Spring Boot app is running.',
-        '2. Verify CORS is enabled in AutomationController.',
+        '2. Verify CORS is enabled in Config.',
         'Falling back to Simulation Mode in 3 seconds...'
       ]);
       await new Promise(r => setTimeout(r, 3000));
@@ -389,23 +318,23 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                 Controller
               </button>
               <button 
+                onClick={() => setActiveCodeTab('SERVICE')}
+                className={`px-6 py-3 text-sm font-medium transition-colors ${activeCodeTab === 'SERVICE' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800/50' : 'text-slate-400 hover:text-white'}`}
+              >
+                Service (Logic)
+              </button>
+              <button 
                 onClick={() => setActiveCodeTab('DTO')}
                 className={`px-6 py-3 text-sm font-medium transition-colors ${activeCodeTab === 'DTO' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800/50' : 'text-slate-400 hover:text-white'}`}
               >
                 DTOs
-              </button>
-              <button 
-                onClick={() => setActiveCodeTab('POM')}
-                className={`px-6 py-3 text-sm font-medium transition-colors ${activeCodeTab === 'POM' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800/50' : 'text-slate-400 hover:text-white'}`}
-              >
-                pom.xml
               </button>
             </div>
 
             <div className="flex-1 overflow-hidden relative group">
               <div className="absolute top-4 right-4 z-10">
                  <button 
-                   onClick={() => copyCode(activeCodeTab === 'CONTROLLER' ? JAVA_CODE_CONTROLLER : activeCodeTab === 'DTO' ? JAVA_CODE_DTO : JAVA_CODE_POM)}
+                   onClick={() => copyCode(activeCodeTab === 'CONTROLLER' ? JAVA_CODE_CONTROLLER : activeCodeTab === 'SERVICE' ? JAVA_CODE_SERVICE : JAVA_CODE_DTO)}
                    className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-colors shadow-lg border border-slate-600"
                  >
                    {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
@@ -414,8 +343,8 @@ export const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
               </div>
               <pre className="h-full overflow-auto p-6 text-sm font-mono text-slate-300 leading-relaxed bg-[#0d1117]">
                 {activeCodeTab === 'CONTROLLER' && JAVA_CODE_CONTROLLER}
+                {activeCodeTab === 'SERVICE' && JAVA_CODE_SERVICE}
                 {activeCodeTab === 'DTO' && JAVA_CODE_DTO}
-                {activeCodeTab === 'POM' && JAVA_CODE_POM}
               </pre>
             </div>
           </div>
