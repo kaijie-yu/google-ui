@@ -1,0 +1,5 @@
+{
+  "name": "AutoFlow UI",
+  "description": "A modern UI Automation management dashboard built with React and Tailwind CSS. Features element repository management, operation definitions, and visual test workflow orchestration.",
+  "requestFramePermissions": []
+}
